@@ -1,98 +1,100 @@
+# main.py
+
 # Import typing for structured state definition
 from typing import Annotated
 from typing_extensions import TypedDict
 
-from langgraph.types import Command, interrupt
-
 # LangGraph core imports
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.types import interrupt
 
-# Define the chatbot state
+# LangChain / LangGraph tools
+from langchain_core.tools import tool
+from langchain_tavily import TavilySearch
+from langchain_cohere import ChatCohere
+
+# Load environment variables
+from dotenv import load_dotenv
+import os, uuid
+load_dotenv()
+
+# API keys
+cohere_key = os.getenv("COHERE_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
+
+# -- Define memory-enabled state
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-# Create a graph builder with that state
-graph_builder = StateGraph(State)
+# -- Tool 1: Web search via Tavily
+search_tool = TavilySearch(max_results=2)
 
+# -- Tool 2: Human assistance using LangGraph's interrupt
+@tool
 def human_assistance(query: str) -> str:
-    """Request assistance from a human."""
+    """Request assistance from a human operator."""
     human_response = interrupt({"query": query})
     return human_response["data"]
-# --- Set up Cohere LLM ---
-from langchain_community.llms import Cohere
-from dotenv import load_dotenv
-import os
 
-# Load environment variables from .env
-load_dotenv()
+tools = [search_tool, human_assistance]
 
-# Now access them using os.environ
-cohere_key = os.getenv("COHERE_API_KEY")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+# -- Initialize the LLM (ChatCohere supports tools)
+llm = ChatCohere(cohere_api_key=cohere_key, model="command-r-plus")
+llm_with_tools = llm.bind_tools(tools)
 
-
-# Set API key as environment variable
-os.environ['COHERE_API_KEY'] = cohere_key
-
-# Initialize the LLM
-llm = Cohere(cohere_api_key=cohere_key, model="command")
-
-# Import the Tavily tool
-from tools.tavily_search import search_tavily
-
-# Add in-memory checkpointer
-from langgraph.checkpoint.memory import MemorySaver
-memory = MemorySaver()  # Using MemorySaver for state memory (short-term)
-
-# Chatbot logic
+# -- Chatbot logic (calls LLM + uses tool calling)
 def chatbot(state: State):
-    user_message = state["messages"][-1].content.lower()
+    message = llm_with_tools.invoke(state["messages"])
+    # Ensure only one tool call per step (required for human interruption)
+    assert len(message.tool_calls) <= 1
+    return {"messages": [message]}
 
-    # Use Tavily for web search queries
-    if "search" in user_message or "lookup" in user_message:
-        tool_result = search_tavily(user_message)
-        return {"messages": [{"role": "assistant", "content": tool_result}]}
-    
-    # Use LLM otherwise
-    bot_response = llm.invoke(user_message)
-    return {"messages": [{"role": "assistant", "content": bot_response}]}
+# -- Set up memory and graph
+memory = MemorySaver()
+graph_builder = StateGraph(State)
 
-# Register the chatbot node in the graph
+# -- Register nodes
 graph_builder.add_node("chatbot", chatbot)
+tool_node = ToolNode(tools=tools)
+graph_builder.add_node("tools", tool_node)
 
-# Set the flow: START -> chatbot -> END
+# -- Define flow
 graph_builder.set_entry_point("chatbot")
 graph_builder.set_finish_point("chatbot")
+graph_builder.add_conditional_edges("chatbot", tools_condition)
+graph_builder.add_edge("tools", "chatbot")
 
-# Compile the graph with memory (checkpointer)
-graph = graph_builder.compile(checkpointer=memory)  # Attaching memory
+# -- Compile with memory
+graph = graph_builder.compile(checkpointer=memory)
 
-# OPTIONAL: Try visualizing the graph
+# -- Optional: Visualize graph
 try:
     from IPython.display import Image, display
     display(Image(graph.get_graph().draw_mermaid_png()))
 except:
-    pass  # Skip if IPython/display isn't available
+    pass
 
-#  Function to stream chat updates, with thread_id to persist memory
-import uuid
-thread_id = str(uuid.uuid4())  # One unique ID per session (you can replace with user ID)
-
+# -- Streaming function
+thread_id = str(uuid.uuid4())
 def stream_graph_updates(user_input: str):
-    config = {"configurable": {"thread_id": thread_id}}  # The  Correct place to set memory session
+    config = {"configurable": {"thread_id": thread_id}}
     for event in graph.stream({"messages": [{"role": "user", "content": user_input}]}, config=config):
         for value in event.values():
-            print("Assistant:", value["messages"][-1]["content"])
+            print("Assistant:", value["messages"][-1].content)
 
-# Run chatbot loop
-while True:
-    try:
-        user_input = input("User: ")
-        if user_input.lower() in ["quit", "exit", "q"]:
-            print("Goodbye!")
+# -- Run chatbot loop
+if __name__ == "__main__":
+    while True:
+        try:
+            user_input = input("User: ")
+            if user_input.lower() in ["exit", "quit", "q"]:
+                print("Goodbye!")
+                break
+            stream_graph_updates(user_input)
+        except KeyboardInterrupt:
+            print("\nGoodbye!")
             break
-        stream_graph_updates(user_input)
-    except KeyboardInterrupt:
-        print("\nGoodbye!")
-        break

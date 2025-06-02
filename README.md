@@ -18,7 +18,7 @@ The bot forgets context every time. There's no memory of past questions:
 Context is preserved. The bot can remember what was said previously:
 checkpointer 
 When you invoke the graph again using the same thread_id, the graph loads its saved state, allowing the chatbot to pick up where it left off.
-
+![Before Memory](assets/after%20memory.PNG)
 ---
 
 ## 🧰 Features
