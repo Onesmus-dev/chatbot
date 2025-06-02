@@ -41,7 +41,7 @@ When you invoke the graph again using the same thread_id, the graph loads its sa
 - │ ├── before-memory.png # Screenshot before memory was added
 - │ └── 
 - ├── README.md # This file
-
+---
 ## 🧠 Memory Integration
 This project uses LangGraph’s built-in MemorySaver:
 
@@ -55,4 +55,5 @@ This project uses LangGraph’s built-in MemorySaver:
 [from langgraph.checkpoint.memory import MemorySaver
 memory = MemorySaver()
 
-graph = graph_builder.compile(checkpointer=memory)]
+graph = graph_builder.compile(checkpointer=memory)]\
+---
