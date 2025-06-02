@@ -52,8 +52,11 @@ This project uses LangGraph’s built-in MemorySaver:
 - 🔁 Can be replaced with persistent memory like SQLite or Postgres for production
 
 - Memory is activated via:
-[from langgraph.checkpoint.memory import MemorySaver
-memory = MemorySaver()
 
-graph = graph_builder.compile(checkpointer=memory)]
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+memory = MemorySaver()
+graph = graph_builder.compile(checkpointer=memory)
+
 ---
